@@ -34,21 +34,22 @@ def avanzar_turno_db(cola_id):
     with transaction.atomic():
         cola = Cola.objects.select_for_update().get(pk=cola_id)
         cola.numero_actual += 1
+        cola.numero_global = cola.numero_actual
         cola.save()
         return cola
     
-@sync_to_async
-def crear_cola_db(numero_inicial, numero_final):
-    with transaction.atomic():
-        cola = Cola.objects.create(
-            nombre=f"Cola {Cola.objects.count() + 1}",
-            numero_inicial=numero_inicial,
-            numero_final=numero_final,
-            numero_actual=numero_inicial,
-            numero_global=numero_inicial,
-            Tipo_id=1  # Asignamos un Tipo por defecto (debes ajustarlo según tu lógica
-        )
-        return cola
+# @sync_to_async
+# def crear_cola_db(numero_inicial, numero_final):
+#     with transaction.atomic():
+#         cola = Cola.objects.create(
+#             nombre=f"Cola {Cola.objects.count() + 1}",
+#             numero_inicial=numero_inicial,
+#             numero_final=numero_final,
+#             numero_actual=numero_inicial,
+#             numero_global=numero_inicial,
+#             Tipo_id=1  # Asignamos un Tipo por defecto (debes ajustarlo según tu lógica
+#         )
+#         return cola
     
 @sync_to_async
 def editar_cola_db(id, nombre, numero_inicial, numero_final, tipo_id):
@@ -115,8 +116,12 @@ class Mutation:
         }
         channel_layer = get_channel_layer()
         await channel_layer.group_send(
-            f"cola_{cola.id}",    # Usa cola.id obtenido del avance
-            {"type": "update_cola", "data": cola_data}
+            f"cola_{str(cola.id)}",    # Usa cola.id obtenido del avance
+            {   
+                "type": "update_cola", 
+                "group": f"cola_{str(cola.id)}",  
+                "data": cola_data
+            }
         )
         return ColaType(
             id=cola.id,

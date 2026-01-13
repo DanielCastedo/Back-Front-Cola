@@ -9,20 +9,22 @@ class Subscription:
     @strawberry.subscription
     async def vigilar_cola(self, info: strawberry.Info, cola_id: strawberry.ID) -> AsyncGenerator[ColaType, None]:
         ws = info.context["ws"]
-        group_name = f"cola_{cola_id}"
+        group_name = f"cola_{str(cola_id)}"
 
         async with ws.listen_to_channel("update_cola", groups=[group_name]) as cm:
             async for message in cm:
-                # message["data"] ahora es un DICCIONARIO simple
-                data = message["data"]
+                if message.get("group") != group_name:
+                    continue
                 
-                # Usamos corchetes [] porque es un diccionario
-                yield ColaType(
-                    id=data["id"],
-                    nombre=data["nombre"],
-                    numero_inicial=data["numero_inicial"],
-                    numero_final=data["numero_final"],
-                    numero_actual=data["numero_actual"],
-                    numero_global=data["numero_global"],
-                    Tipo=data["Tipo"]
-                )
+                # message["data"] ahora es un DICCIONARIO simple
+                if message["type"] == "update_cola":
+                    data = message["data"]
+                    yield ColaType(
+                        id=data["id"],
+                        nombre=data["nombre"],
+                        numero_inicial=data["numero_inicial"],
+                        numero_final=data["numero_final"],
+                        numero_actual=data["numero_actual"],
+                        numero_global=data["numero_global"],
+                        Tipo=data["Tipo"]
+                    )
