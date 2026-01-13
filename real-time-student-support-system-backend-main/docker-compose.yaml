@@ -1,0 +1,96 @@
+services:
+  # Django App
+  backend:
+   container_name: django
+   build: .
+   command: uvicorn core.asgi:application --host 0.0.0.0 --port 8000 --reload
+   volumes:
+     - .:/app
+   ports:
+     - 8000:8000
+   depends_on:
+     - django_redis
+     - django_db
+    
+  # Redis
+  django_redis:
+   image: redis
+   container_name: django_redis
+   ports:
+    - 6379:6379
+  
+  # Database
+  django_db:
+    image: postgres
+    container_name: postgresql
+    restart: always
+    environment:
+      POSTGRES_DB: django_db
+      POSTGRES_USER: django
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - 5432:5432
+    volumes:
+      - .dbdata:/var/lib/postgresql
+
+  django_pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin_django
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - django_db
+    volumes:
+      - .pgadmin_data:/var/lib/pgadmin
+    
+  # Celery
+  # celery_worker:
+  #   container_name: celery_worker
+  #   build: .
+  #   command: celery -A core worker --loglevel=info
+  #   volumes:
+  #     - .:/app
+  #   ports:
+  #     - 8004:8004
+  #   depends_on:
+  #    - django_redis
+  #    - django_db
+  
+  # # celery beat
+  # celery_beat:
+  #   container_name: celery_beat
+  #   build: .
+  #   command: celery -A core beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
+  #   volumes:
+  #     - .:/app
+  #   ports:
+  #     - 8005:8005
+  #   depends_on:
+  #    - django_redis
+  #    - django_db
+
+  # redis_commander:
+  #   image: rediscommander/redis-commander:latest
+  #   container_name: redis_commander
+  #   restart: always
+  #   environment:
+  #     - REDIS_HOSTS=local:django_redis:6379
+  #   ports:
+  #     - "8081:8081"
+  #   depends_on:
+  #     - django_redis
+    
+
+
+# # 1. Bajar
+# docker compose down
+
+# # 2. Reconstruir para que instale las nuevas dependencias
+# docker compose build --no-cache backend
+
+# # 3. Subir
+# docker compose up
