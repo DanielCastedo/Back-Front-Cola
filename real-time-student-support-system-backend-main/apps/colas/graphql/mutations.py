@@ -6,6 +6,7 @@ from apps.colas.models import Cola
 from .types import ColaType
 from apps.colas.models import Tipo
 from .types import TipoType
+from django.db.models import Max
 
 
 @sync_to_async
@@ -32,11 +33,46 @@ def eliminar_tipo_db(id):
 @sync_to_async
 def avanzar_turno_db(cola_id):
     with transaction.atomic():
+        # Obtenemos la cola que se está atendiendo
         cola = Cola.objects.select_for_update().get(pk=cola_id)
+
+        # Avanzamos el numero actual de esta cola
         cola.numero_actual += 1
-        cola.numero_global = cola.numero_actual
         cola.save()
+
+        # Obtenemos el número global máximo de todas las colas del mismo tipo
+        max_global = Cola.objects.filter(Tipo_id=cola.Tipo_id).aggregate(max_num=Max('numero_global'))['max_num'] or 0
+
+        # Nuevo numero global será max_global + 1
+        nuevo_global = max_global + 1
+
+        # Actualizamos todas las colas del mismo tipo con el nuevo numero_global
+        Cola.objects.filter(Tipo_id=cola.Tipo_id).update(numero_global=nuevo_global)
+
+        # Refrescamos la cola actualizada
+        cola.refresh_from_db()
+
         return cola
+    
+# Función para notificar a todas las colas del mismo tipo
+async def notificar_colas_tipo(tipo_id):
+    channel_layer = get_channel_layer()
+    colas = await sync_to_async(list)(Cola.objects.filter(Tipo_id=tipo_id))
+    
+    for cola in colas:
+        data = {
+            "id": cola.id,
+            "nombre": cola.nombre,
+            "numero_inicial": cola.numero_inicial,
+            "numero_final": cola.numero_final,
+            "numero_actual": cola.numero_actual,
+            "numero_global": cola.numero_global,
+            "Tipo": cola.Tipo_id
+        }
+        await channel_layer.group_send(
+            f"cola_{str(cola.id)}",
+            {"type": "update_cola", "group": f"cola_{str(cola.id)}", "data": data}
+        )
     
 # @sync_to_async
 # def crear_cola_db(numero_inicial, numero_final):
@@ -101,10 +137,12 @@ class Mutation:
     async def eliminar_tipo(self, id: strawberry.ID) -> bool:
         await eliminar_tipo_db(id)
         return True
- 
+
     @strawberry.mutation
     async def llamar_siguiente(self, cola_id: strawberry.ID) -> ColaType:
         cola = await avanzar_turno_db(cola_id)
+
+        # Preparar los datos para notificar
         cola_data = {
             "id": cola.id,
             "nombre": cola.nombre,
@@ -114,15 +152,33 @@ class Mutation:
             "numero_global": cola.numero_global,
             "Tipo": cola.Tipo_id
         }
+
         channel_layer = get_channel_layer()
-        await channel_layer.group_send(
-            f"cola_{str(cola.id)}",    # Usa cola.id obtenido del avance
-            {   
-                "type": "update_cola", 
-                "group": f"cola_{str(cola.id)}",  
-                "data": cola_data
-            }
-        )
+
+        # Obtener todas las colas del mismo tipo para enviarles la actualización
+        colas_del_tipo = await sync_to_async(list)(Cola.objects.filter(Tipo_id=cola.Tipo_id))
+
+        # Enviar la actualización a cada grupo (cola)
+        for c in colas_del_tipo:
+            # Actualiza el campo 'id' para cada cola y demás datos si quieres (puedes personalizar)
+            cola_data_actualizada = cola_data.copy()
+            cola_data_actualizada["id"] = c.id
+            cola_data_actualizada["nombre"] = c.nombre
+            cola_data_actualizada["numero_inicial"] = c.numero_inicial
+            cola_data_actualizada["numero_final"] = c.numero_final
+            cola_data_actualizada["numero_actual"] = c.numero_actual
+            # 'numero_global' es común a todos y ya está correcto
+            cola_data_actualizada["Tipo"] = c.Tipo_id
+
+            await channel_layer.group_send(
+                f"cola_{str(c.id)}",
+                {
+                    "type": "update_cola",
+                    "group": f"cola_{str(c.id)}",
+                    "data": cola_data_actualizada,
+                }
+            )
+
         return ColaType(
             id=cola.id,
             nombre=cola.nombre,
@@ -130,7 +186,7 @@ class Mutation:
             numero_final=cola.numero_final,
             numero_actual=cola.numero_actual,
             numero_global=cola.numero_global,
-            Tipo=cola.Tipo_id
+            Tipo=cola.Tipo_id,
         )
 
     @strawberry.mutation
